@@ -52,3 +52,18 @@ Lost priority / funding	...	...
 10. THE ASK — what decision or resource do you need right now?
 e.g. "Approve 2 devs for 6 weeks to build a prototype" / "Feedback on scope" / "Budget of $X"
 
+# POC
+1. Download and import data into sql db
+   - Postgres
+   - 10 stock for 1 day.
+   - Dockerized db
+   - download data with yfinance (python).
+   - Stefan
+2. Kafka
+   - Create .Net producer that gets data from Postgres and sends it to the cluster.
+4. Backend DB - same as above ^
+3. Backend in .NET
+   - consumer that gets the data from the kafka cluster.
+   - two users with their own data - no auth
+   - buy & sell
+   - historical data
