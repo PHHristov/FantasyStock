@@ -6,8 +6,8 @@ import yfinance as yf
 from dotenv import load_dotenv
 
 TICKERS = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA", "JPM", "V", "JNJ"]
-START = "2024-03-04"
-END = "2024-03-05"  # yfinance's `end` is exclusive, so this window covers just 2024-03-04
+START = "2024-03-01"
+END = "2024-04-01"  # yfinance's `end` is exclusive, so this window covers all of March 2024
 
 # %%
 data = yf.download(tickers=TICKERS, start=START, end=END, group_by="ticker")
