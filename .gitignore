@@ -1,2 +1,12 @@
 .env
 .venv/
+
+# .NET build output (tick-engine, and the planned .NET backend)
+**/bin/
+**/obj/
+*.user
+
+# IDE / editor
+.vs/
+.idea/
+.DS_Store
