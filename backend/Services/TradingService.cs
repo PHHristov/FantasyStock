@@ -24,7 +24,7 @@ public sealed class TradingService
         _priceCache = priceCache;
     }
 
-    public async Task<TradeDto> ExecuteAsync(PlaceTradeRequest request, CancellationToken ct)
+    public async Task<TradeDto> ExecuteAsync(int userId, PlaceTradeRequest request, CancellationToken ct)
     {
         var side = request.Side.Trim().ToUpperInvariant();
         if (side is not ("BUY" or "SELL"))
@@ -56,11 +56,11 @@ public sealed class TradingService
         await using (var lockCmd = new NpgsqlCommand("SELECT cash FROM users WHERE id = @userId FOR UPDATE", conn))
         {
             lockCmd.Transaction = tx;
-            lockCmd.Parameters.AddWithValue("userId", request.UserId);
+            lockCmd.Parameters.AddWithValue("userId", userId);
             var result = await lockCmd.ExecuteScalarAsync(ct);
             if (result is null)
             {
-                throw new TradeValidationException($"unknown user id {request.UserId}");
+                throw new TradeValidationException($"unknown user id {userId}");
             }
 
             cash = (decimal)result;
@@ -71,7 +71,7 @@ public sealed class TradingService
             "SELECT quantity FROM holdings WHERE user_id = @userId AND ticker = @ticker FOR UPDATE", conn))
         {
             holdingCmd.Transaction = tx;
-            holdingCmd.Parameters.AddWithValue("userId", request.UserId);
+            holdingCmd.Parameters.AddWithValue("userId", userId);
             holdingCmd.Parameters.AddWithValue("ticker", ticker);
             var result = await holdingCmd.ExecuteScalarAsync(ct);
             if (result is not null)
@@ -108,7 +108,7 @@ public sealed class TradingService
         {
             updateUserCmd.Transaction = tx;
             updateUserCmd.Parameters.AddWithValue("cash", cash);
-            updateUserCmd.Parameters.AddWithValue("userId", request.UserId);
+            updateUserCmd.Parameters.AddWithValue("userId", userId);
             await updateUserCmd.ExecuteNonQueryAsync(ct);
         }
 
@@ -120,7 +120,7 @@ public sealed class TradingService
             """, conn))
         {
             upsertHoldingCmd.Transaction = tx;
-            upsertHoldingCmd.Parameters.AddWithValue("userId", request.UserId);
+            upsertHoldingCmd.Parameters.AddWithValue("userId", userId);
             upsertHoldingCmd.Parameters.AddWithValue("ticker", ticker);
             upsertHoldingCmd.Parameters.AddWithValue("qty", currentQty);
             await upsertHoldingCmd.ExecuteNonQueryAsync(ct);
@@ -136,7 +136,7 @@ public sealed class TradingService
             """, conn))
         {
             insertTradeCmd.Transaction = tx;
-            insertTradeCmd.Parameters.AddWithValue("userId", request.UserId);
+            insertTradeCmd.Parameters.AddWithValue("userId", userId);
             insertTradeCmd.Parameters.AddWithValue("ticker", ticker);
             insertTradeCmd.Parameters.AddWithValue("side", side);
             insertTradeCmd.Parameters.AddWithValue("qty", request.Quantity);
@@ -150,6 +150,6 @@ public sealed class TradingService
 
         await tx.CommitAsync(ct);
 
-        return new TradeDto(tradeId, request.UserId, ticker, side, request.Quantity, price, executedAt);
+        return new TradeDto(tradeId, userId, ticker, side, request.Quantity, price, executedAt);
     }
 }

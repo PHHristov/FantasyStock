@@ -83,6 +83,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       TOPIC_PATTERN: ${TOPIC_PATTERN:-^stock-ticks\..*}
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY}
 
 volumes:
   pgdata:

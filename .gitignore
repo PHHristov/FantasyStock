@@ -1,6 +1,10 @@
 .env
 .venv/
 
+# Contains local DB/Kafka credentials for `dotnet run` / F5 - same reason
+# .env is ignored above.
+**/Properties/launchSettings.json
+
 # .NET build output (tick-engine, and the planned .NET backend)
 **/bin/
 **/obj/
