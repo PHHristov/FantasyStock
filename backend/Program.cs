@@ -93,11 +93,19 @@ var app = builder.Build();
 app.Services.GetRequiredService<PriceBroadcaster>();
 
 app.UseCors();
+
+// Swagger's own routes (/swagger/*) aren't minimal-API endpoints, so with
+// the authorization fallback policy below they'd otherwise be treated as
+// "unmatched" and get rejected before ever reaching Swagger's middleware.
+// Placing these before UseAuthentication/UseAuthorization lets them serve
+// /swagger/* directly - everything else still flows through to auth as
+// normal.
+app.UseSwagger();
+app.UseSwaggerUI();
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseWebSockets();
-app.UseSwagger();
-app.UseSwaggerUI();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
     .AllowAnonymous();
