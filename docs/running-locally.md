@@ -144,6 +144,34 @@ curl -X POST http://localhost:8080/trades -H "Authorization: Bearer $TOKEN" \
 The trade only works once `tick-engine` has actually produced at least one
 tick for that ticker — give it a few seconds after startup.
 
+## Frontend (either mode)
+
+`frontend/` is a plain static page — no npm, no build step. It talks to the
+backend on `http://localhost:8080`, so start the backend first (either mode
+above), then serve the folder with any static file server:
+
+```bash
+python3 -m http.server 5500 --directory frontend
+```
+
+Open http://localhost:5500. The market list and chart are public; log in or
+create an account in the right-hand panel to see your portfolio and trade.
+Stop it with `Ctrl+C`.
+
+- **Charts build up live.** There's no price-history endpoint, so the chart
+  fills from the `/ws/prices` WebSocket as ticks arrive, one simulated
+  trading day per tick. A full month appears after one tick-engine lap
+  (~100s at the default 5s interval). The highlighted point is the day the
+  replay is currently on.
+- **Logging out** only discards the token in the browser (it's kept in
+  `sessionStorage`, so it also goes away when the tab closes). JWTs can't be
+  revoked server-side yet; see `poc-3-status.md`.
+- Backend somewhere other than `localhost:8080`? Set
+  `window.FANTASYSTOCK_API_BASE` in `index.html` before `app.js` loads.
+- Chart.js and the fonts load from CDNs, so the page needs internet access.
+  Without it, prices still update in the market list; only the chart is
+  missing.
+
 ## Troubleshooting
 
 - **`permission denied ... docker.sock`** — your user isn't in the `docker`

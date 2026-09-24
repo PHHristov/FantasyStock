@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FantasyStock</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">FantasyStock</div>
+    <div class="sim" id="sim-date">Waiting for market data…</div>
+    <div class="feed" id="feed-status" data-state="connecting">
+      <span class="dot" aria-hidden="true"></span>
+      <span class="feed-label">Connecting</span>
+    </div>
+    <div class="account" id="account"></div>
+  </header>
+
+  <main class="layout">
+    <!-- Market: every ticker the tick-engine is publishing, public -->
+    <section class="card market" aria-labelledby="market-title">
+      <div class="card-head">
+        <h2 id="market-title">Market</h2>
+        <span class="hint">live</span>
+      </div>
+      <ul class="market-list" id="market-list"></ul>
+      <p class="empty" id="market-empty">Waiting for the tick-engine to publish prices…</p>
+    </section>
+
+    <!-- Chart for the selected ticker -->
+    <section class="card chart" aria-labelledby="chart-title">
+      <div class="chart-head">
+        <div>
+          <h2 id="chart-title" class="chart-ticker">—</h2>
+          <div class="chart-price">
+            <span id="chart-last" class="num">—</span>
+            <span id="chart-change" class="change num"></span>
+          </div>
+        </div>
+        <dl class="bar-stats" id="bar-stats">
+          <div><dt>Open</dt><dd id="stat-open" class="num">—</dd></div>
+          <div><dt>High</dt><dd id="stat-high" class="num">—</dd></div>
+          <div><dt>Low</dt><dd id="stat-low" class="num">—</dd></div>
+          <div><dt>Volume</dt><dd id="stat-volume" class="num">—</dd></div>
+        </dl>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="price-chart" aria-label="Closing price by simulated trading day"></canvas>
+        <p class="empty chart-empty" id="chart-empty">The chart fills in as ticks arrive — one simulated trading day every few seconds.</p>
+      </div>
+    </section>
+
+    <aside class="side">
+      <!-- Logged out -->
+      <section class="card" id="auth-panel" aria-labelledby="auth-title">
+        <div class="card-head">
+          <h2 id="auth-title">Your account</h2>
+        </div>
+        <div class="tabs" role="tablist">
+          <button type="button" class="tab" id="tab-login" role="tab" aria-selected="true">Log in</button>
+          <button type="button" class="tab" id="tab-register" role="tab" aria-selected="false">Create account</button>
+        </div>
+        <form id="auth-form" class="form" novalidate>
+          <label for="auth-username">Username</label>
+          <input id="auth-username" name="username" autocomplete="username" required>
+          <label for="auth-password">Password</label>
+          <input id="auth-password" name="password" type="password" autocomplete="current-password" required minlength="6">
+          <p class="form-hint" id="auth-hint">New accounts start with $100,000 in cash.</p>
+          <p class="message" id="auth-message" role="alert" hidden></p>
+          <button type="submit" class="btn primary" id="auth-submit">Log in</button>
+        </form>
+      </section>
+
+      <!-- Logged in: trade ticket -->
+      <section class="card" id="trade-panel" aria-labelledby="trade-title" hidden>
+        <div class="card-head">
+          <h2 id="trade-title">Trade</h2>
+          <span class="hint">market order</span>
+        </div>
+        <form id="trade-form" class="form" novalidate>
+          <div class="side-toggle" role="group" aria-label="Order side">
+            <button type="button" class="side-btn" id="side-buy" data-side="BUY" aria-pressed="true">Buy</button>
+            <button type="button" class="side-btn" id="side-sell" data-side="SELL" aria-pressed="false">Sell</button>
+          </div>
+          <div class="row-2">
+            <div>
+              <label for="trade-ticker">Stock</label>
+              <select id="trade-ticker"></select>
+            </div>
+            <div>
+              <label for="trade-qty">Shares</label>
+              <input id="trade-qty" type="number" min="1" step="1" value="1" inputmode="numeric">
+            </div>
+          </div>
+          <dl class="ticket-summary">
+            <div><dt>Price</dt><dd id="ticket-price" class="num">—</dd></div>
+            <div><dt id="ticket-est-label">Est. cost</dt><dd id="ticket-est" class="num">—</dd></div>
+            <div><dt id="ticket-avail-label">Cash available</dt><dd id="ticket-avail" class="num">—</dd></div>
+          </dl>
+          <p class="message" id="trade-message" role="status" hidden></p>
+          <button type="submit" class="btn primary" id="trade-submit">Buy</button>
+        </form>
+      </section>
+
+      <!-- Logged in: portfolio -->
+      <section class="card" id="portfolio-panel" aria-labelledby="portfolio-title" hidden>
+        <div class="card-head">
+          <h2 id="portfolio-title">Portfolio</h2>
+          <span class="hint" id="portfolio-owner"></span>
+        </div>
+        <div class="totals">
+          <div class="total-main">
+            <span class="label">Total value</span>
+            <span id="pf-total" class="num big">—</span>
+            <span id="pf-pnl" class="change num"></span>
+          </div>
+          <div class="total-split">
+            <div><span class="label">Cash</span><span id="pf-cash" class="num">—</span></div>
+            <div><span class="label">Stocks</span><span id="pf-holdings" class="num">—</span></div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="holdings-table">
+            <thead>
+              <tr><th>Stock</th><th class="r">Shares</th><th class="r">Price</th><th class="r">Value</th></tr>
+            </thead>
+            <tbody id="holdings-body"></tbody>
+          </table>
+        </div>
+        <p class="empty" id="holdings-empty">No positions yet. Place a buy order to get started.</p>
+      </section>
+    </aside>
+
+    <!-- Logged in: trade history -->
+    <section class="card trades" id="trades-panel" aria-labelledby="trades-title" hidden>
+      <div class="card-head">
+        <h2 id="trades-title">Recent trades</h2>
+        <span class="hint">newest first</span>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>Time</th><th>Side</th><th>Stock</th><th class="r">Shares</th><th class="r">Price</th><th class="r">Total</th></tr>
+          </thead>
+          <tbody id="trades-body"></tbody>
+        </table>
+      </div>
+      <p class="empty" id="trades-empty">No trades yet.</p>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
