@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>FantasyStock — live tick feed</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #0e1116;
+    --panel: #161b22;
+    --border: #2a313c;
+    --text: #e6edf3;
+    --muted: #8b96a5;
+    --up: #3fb950;
+    --down: #f85149;
+    --accent: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    font-family: ui-monospace, "SF Mono", Consolas, "Cascadia Code", monospace;
+    background: var(--bg);
+    color: var(--text);
+  }
+  h1 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+  .status { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 20px; font-size: 12px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.on { background: var(--up); }
+  .dot.off { background: var(--down); }
+
+  h2 {
+    font-size: 11px; font-weight: 500; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin: 0 0 10px;
+  }
+
+  /* --- charts: small multiples, one panel per ticker --- */
+  #charts {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 10px;
+    margin-bottom: 28px;
+  }
+  .chart-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px 8px;
+    position: relative;
+  }
+  .chart-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 4px;
+  }
+  .chart-ticker { font-weight: 600; color: var(--accent); font-size: 13px; }
+  .chart-price { font-size: 13px; font-variant-numeric: tabular-nums; }
+  .chart-price.up { color: var(--up); }
+  .chart-price.down { color: var(--down); }
+  .chart-svg { width: 100%; height: 64px; display: block; overflow: visible; }
+  .chart-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .chart-grid { stroke: var(--border); stroke-width: 1; }
+  .chart-dot { fill: var(--accent); }
+  .chart-crosshair { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 2; opacity: 0; }
+  .chart-hit { fill: transparent; cursor: crosshair; }
+  .chart-axis-label { fill: var(--muted); font-size: 9px; font-family: inherit; }
+  .chart-empty { color: var(--muted); font-size: 11px; height: 64px; display: flex; align-items: center; }
+  .chart-hover-label { color: var(--muted); font-size: 10px; }
+
+  table { border-collapse: collapse; width: 100%; max-width: 900px; font-size: 13px; }
+  th, td { text-align: right; padding: 6px 12px; border-bottom: 1px solid var(--border); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+  tr.flash { animation: flash 0.6s ease-out; }
+  @keyframes flash { from { background: rgba(88, 166, 255, 0.25); } to { background: transparent; } }
+  .ticker { font-weight: 600; color: var(--accent); }
+  #log {
+    margin-top: 24px;
+    max-width: 900px;
+    max-height: 240px;
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 11px;
+    color: var(--muted);
+    white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+  <h1>FantasyStock — live tick feed</h1>
+  <div class="sub">ws://localhost:8080/ws/prices</div>
+  <div class="status"><span id="dot" class="dot"></span><span id="statusText">connecting…</span></div>
+
+  <h2>Price charts</h2>
+  <div id="charts"></div>
+
+  <h2>Latest tick per ticker</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Ticker</th><th>Trade date</th><th>Open</th><th>High</th><th>Low</th>
+        <th>Close</th><th>Volume</th><th>Lap</th><th>Received</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <h2 style="margin-top: 24px;">Raw messages</h2>
+  <div id="log"></div>
+
+<script>
+  const url = "ws://localhost:8080/ws/prices";
+  const rowsEl = document.getElementById("rows");
+  const chartsEl = document.getElementById("charts");
+  const dotEl = document.getElementById("dot");
+  const statusEl = document.getElementById("statusText");
+  const logEl = document.getElementById("log");
+  const rowsByTicker = new Map();
+  const chartsByTicker = new Map(); // ticker -> { history: [...], els: {...} }
+
+  const MAX_POINTS = 120; // rolling window per ticker, keeps the SVG cheap to redraw
+  const SVG_W = 100; // viewBox units - scales to 100% width via CSS
+  const SVG_H = 64;
+  const PAD_TOP = 6, PAD_BOTTOM = 6;
+
+  function setStatus(state, text) {
+    dotEl.className = "dot " + state;
+    statusEl.textContent = text;
+  }
+
+  function log(line) {
+    const time = new Date().toLocaleTimeString();
+    logEl.textContent += `[${time}] ${line}\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function svgEl(tag, attrs) {
+    const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    return el;
+  }
+
+  function createChartPanel(ticker) {
+    const panel = document.createElement("div");
+    panel.className = "chart-panel";
+    panel.innerHTML = `
+      <div class="chart-head">
+        <span class="chart-ticker">${ticker}</span>
+        <span>
+          <span class="chart-hover-label"></span>
+          <span class="chart-price"></span>
+        </span>
+      </div>
+      <div class="chart-body"></div>
+    `;
+    chartsEl.appendChild(panel);
+
+    const state = {
+      history: [],
+      panel,
+      priceEl: panel.querySelector(".chart-price"),
+      hoverLabelEl: panel.querySelector(".chart-hover-label"),
+      bodyEl: panel.querySelector(".chart-body"),
+      latestClose: null,
+    };
+    chartsByTicker.set(ticker, state);
+    return state;
+  }
+
+  function renderChart(state) {
+    const { history, bodyEl } = state;
+
+    if (history.length < 2) {
+      bodyEl.innerHTML = `<div class="chart-empty">waiting for more ticks…</div>`;
+      return;
+    }
+
+    const closes = history.map((p) => p.close);
+    const min = Math.min(...closes);
+    const max = Math.max(...closes);
+    const span = max - min || 1; // avoid divide-by-zero on a flat line
+
+    const xAt = (i) => (i / (history.length - 1)) * SVG_W;
+    const yAt = (v) =>
+      PAD_TOP + (1 - (v - min) / span) * (SVG_H - PAD_TOP - PAD_BOTTOM);
+
+    const points = history.map((p, i) => [xAt(i), yAt(p.close)]);
+    const pathD = points.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`).join(" ");
+
+    bodyEl.innerHTML = "";
+    const svg = svgEl("svg", {
+      class: "chart-svg",
+      viewBox: `0 0 ${SVG_W} ${SVG_H}`,
+      preserveAspectRatio: "none",
+    });
+
+    // recessive gridlines at min and max only - not a full axis
+    svg.appendChild(svgEl("line", { class: "chart-grid", x1: 0, x2: SVG_W, y1: yAt(min), y2: yAt(min) }));
+    svg.appendChild(svgEl("line", { class: "chart-grid", x1: 0, x2: SVG_W, y1: yAt(max), y2: yAt(max) }));
+
+    const maxLabel = svgEl("text", { class: "chart-axis-label", x: 2, y: yAt(max) - 2 });
+    maxLabel.textContent = max.toFixed(2);
+    svg.appendChild(maxLabel);
+    const minLabel = svgEl("text", { class: "chart-axis-label", x: 2, y: yAt(min) + 9 });
+    minLabel.textContent = min.toFixed(2);
+    svg.appendChild(minLabel);
+
+    svg.appendChild(svgEl("path", { class: "chart-line", d: pathD, vectorEffect: "non-scaling-stroke" }));
+
+    // endpoint marker - anchors attention on the current price
+    const last = points[points.length - 1];
+    svg.appendChild(svgEl("circle", { class: "chart-dot", cx: last[0], cy: last[1], r: 2 }));
+
+    const crosshair = svgEl("line", {
+      class: "chart-crosshair", x1: 0, x2: 0, y1: 0, y2: SVG_H,
+    });
+    svg.appendChild(crosshair);
+
+    // full-area hit target for hover, bigger than the line itself
+    const hit = svgEl("rect", { class: "chart-hit", x: 0, y: 0, width: SVG_W, height: SVG_H });
+    svg.appendChild(hit);
+
+    hit.addEventListener("mousemove", (e) => {
+      const rect = svg.getBoundingClientRect();
+      const relX = ((e.clientX - rect.left) / rect.width) * SVG_W;
+      const i = Math.max(0, Math.min(history.length - 1, Math.round((relX / SVG_W) * (history.length - 1))));
+      const [px] = points[i];
+
+      crosshair.setAttribute("x1", px);
+      crosshair.setAttribute("x2", px);
+      crosshair.style.opacity = 1;
+
+      // The readout lives in the header (where there's real room) rather
+      // than a floating tooltip box - a panel this small has no space for
+      // one that wouldn't collide with either the header or the chart
+      // itself wherever the hovered point happens to sit.
+      const point = history[i];
+      state.hoverLabelEl.textContent = `${point.tradeDate ?? ""} (lap ${point.lap ?? "?"})`;
+      state.priceEl.textContent = point.close.toFixed(2);
+      // up/down color reflects live "moved since last tick" - not meaningful
+      // for an arbitrary historical point, so keep it neutral while hovering.
+      state.priceEl.classList.remove("up", "down");
+    });
+    hit.addEventListener("mouseleave", () => {
+      crosshair.style.opacity = 0;
+      state.hoverLabelEl.textContent = "";
+      restorePriceDisplay(state);
+    });
+
+    bodyEl.appendChild(svg);
+  }
+
+  function restorePriceDisplay(state) {
+    state.priceEl.textContent = state.latestClose !== null ? state.latestClose.toFixed(2) : "";
+    state.priceEl.classList.remove("up", "down");
+    if (state.latestDirection) state.priceEl.classList.add(state.latestDirection);
+  }
+
+  function updateChart(tick) {
+    let state = chartsByTicker.get(tick.ticker);
+    if (!state) state = createChartPanel(tick.ticker);
+
+    const prevClose = state.history.length ? state.history[state.history.length - 1].close : null;
+
+    state.history.push({ close: tick.close, tradeDate: tick.tradeDate, lap: tick.lap });
+    if (state.history.length > MAX_POINTS) state.history.shift();
+
+    state.latestClose = tick.close;
+    state.latestDirection = prevClose !== null ? (tick.close >= prevClose ? "up" : "down") : null;
+    restorePriceDisplay(state);
+
+    renderChart(state);
+  }
+
+  function connect() {
+    setStatus("", "connecting…");
+    const ws = new WebSocket(url);
+
+    ws.onopen = () => {
+      setStatus("on", "connected");
+      log("connected to " + url);
+    };
+
+    ws.onmessage = (event) => {
+      let tick;
+      try {
+        tick = JSON.parse(event.data);
+      } catch (err) {
+        log("could not parse message: " + event.data);
+        return;
+      }
+
+      updateChart(tick);
+
+      let row = rowsByTicker.get(tick.ticker);
+      if (!row) {
+        row = document.createElement("tr");
+        row.innerHTML = `
+          <td class="ticker"></td><td class="date"></td><td class="open"></td>
+          <td class="high"></td><td class="low"></td><td class="close"></td>
+          <td class="volume"></td><td class="lap"></td><td class="received"></td>`;
+        rowsEl.appendChild(row);
+        rowsByTicker.set(tick.ticker, row);
+      }
+
+      row.querySelector(".ticker").textContent = tick.ticker ?? "";
+      row.querySelector(".date").textContent = tick.tradeDate ?? "";
+      row.querySelector(".open").textContent = tick.open ?? "";
+      row.querySelector(".high").textContent = tick.high ?? "";
+      row.querySelector(".low").textContent = tick.low ?? "";
+      row.querySelector(".close").textContent = tick.close ?? "";
+      row.querySelector(".volume").textContent = tick.volume ?? "";
+      row.querySelector(".lap").textContent = tick.lap ?? "";
+      row.querySelector(".received").textContent = new Date().toLocaleTimeString();
+
+      row.classList.remove("flash");
+      void row.offsetWidth; // restart animation
+      row.classList.add("flash");
+
+      log(JSON.stringify(tick));
+    };
+
+    ws.onerror = () => {
+      setStatus("off", "error - is the backend running on :8080?");
+    };
+
+    ws.onclose = () => {
+      setStatus("off", "disconnected - retrying in 3s…");
+      setTimeout(connect, 3000);
+    };
+  }
+
+  connect();
+</script>
+</body>
+</html>

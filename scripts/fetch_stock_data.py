@@ -14,11 +14,15 @@ data = yf.download(tickers=TICKERS, start=START, end=END, group_by="ticker")
 data
 
 # %%
-load_dotenv()
+load_dotenv(override=True)
 
+# Host-side port is 5433, not the default 5432 - see docker-compose.yml.
+# (5432 is often already taken by a locally installed Postgres, which is
+# exactly what happened here: this used to silently connect to that
+# instead of the Docker container.)
 conn = psycopg2.connect(
-    host="localhost",
-    port=5432,
+    host="127.0.0.1",
+    port=int(os.environ.get("POSTGRES_HOST_PORT", "5433")),
     dbname=os.environ["POSTGRES_DB"],
     user=os.environ["POSTGRES_USER"],
     password=os.environ["POSTGRES_PASSWORD"],
