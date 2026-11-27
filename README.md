@@ -67,3 +67,16 @@ e.g. "Approve 2 devs for 6 weeks to build a prototype" / "Feedback on scope" / "
    - two users with their own data - no auth
    - buy & sell
    - historical data
+
+# Running locally
+`docker compose up --build` starts everything in order: `db` -> `db-migrate` (re-applies `db/02_app_schema.sql`, `db/03_auth_schema.sql`, `db/04_seed_passwords.sql` on every start) -> `kafka` -> `tick-engine` -> `backend`. The backend refuses to start if the schemas are missing.
+
+`GET /health` reports `priceFeed: "live"` once ticks are flowing. Until then `POST /trades` returns `503`; an unknown ticker returns `400` with the list of tradable tickers.
+
+## Seeded users (dev only)
+| Username | Password | Starting cash |
+|----------|-----------|---------------|
+| user1 | user1pass | 100,000.00 |
+| user2 | user2pass | 100,000.00 |
+
+Log in with `POST /auth/login` `{ "username": "user1", "password": "user1pass" }` and use the returned token as `Authorization: Bearer <token>`. The seed only sets a password when none exists, so it never overwrites a changed one. Do not use these credentials outside local development.

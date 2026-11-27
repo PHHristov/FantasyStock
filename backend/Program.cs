@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text;
 using Backend.Auth;
+using Backend.Db;
 using Backend.Models;
 using Backend.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -87,6 +88,8 @@ builder.Services.AddAuthorization(options =>
 
 var app = builder.Build();
 
+await SchemaGuard.EnsureAppliedAsync(app.Configuration);
+
 // PriceBroadcaster must subscribe to PriceCache updates before the first
 // tick arrives, not lazily on the first WebSocket connection - resolving it
 // once here forces that construction at startup.
@@ -107,8 +110,16 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseWebSockets();
 
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
-    .AllowAnonymous();
+app.MapGet("/health", (PriceCache cache) =>
+{
+    var tickers = cache.Snapshot().Count;
+    return Results.Ok(new
+    {
+        status = "ok",
+        priceFeed = tickers > 0 ? "live" : "waiting-for-ticks",
+        tickers,
+    });
+}).AllowAnonymous();
 
 app.MapPost("/auth/register", async (RegisterRequest request, AuthService svc, CancellationToken ct) =>
 {
@@ -163,6 +174,10 @@ app.MapPost("/trades", async (ClaimsPrincipal user, PlaceTradeRequest request, T
     {
         var trade = await svc.ExecuteAsync(user.GetUserId(), request, ct);
         return Results.Ok(trade);
+    }
+    catch (PriceFeedUnavailableException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status503ServiceUnavailable);
     }
     catch (TradeValidationException ex)
     {

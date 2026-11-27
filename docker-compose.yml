@@ -43,6 +43,30 @@ services:
       retries: 10
       start_period: 20s
 
+  # One-shot migration: re-applies the app/auth schemas and seed passwords on
+  # every `docker compose up`. docker-entrypoint-initdb.d only runs on a fresh
+  # volume, so without this an existing volume could be missing 03/04. All
+  # three scripts are idempotent.
+  db-migrate:
+    image: postgres:16
+    container_name: db_migrate
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./db:/migrations:ro
+    command: >
+      sh -c "psql -v ON_ERROR_STOP=1 -f /migrations/02_app_schema.sql
+      && psql -v ON_ERROR_STOP=1 -f /migrations/03_auth_schema.sql
+      && psql -v ON_ERROR_STOP=1 -f /migrations/04_seed_passwords.sql"
+
   tick-engine:
     build:
       context: ./tick-engine
@@ -51,6 +75,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
       kafka:
         condition: service_healthy
     environment:
@@ -73,8 +99,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
       kafka:
         condition: service_healthy
+      tick-engine:
+        condition: service_started
     environment:
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432

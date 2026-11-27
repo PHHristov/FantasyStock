@@ -7,6 +7,9 @@ namespace Backend.Services;
 /// <summary>Thrown for any client-fixable problem with a trade request (bad input, insufficient funds/holdings, unknown user/price).</summary>
 public sealed class TradeValidationException(string message) : Exception(message);
 
+/// <summary>Thrown when no ticks have been received at all - the tick-engine/Kafka pipeline isn't delivering prices yet.</summary>
+public sealed class PriceFeedUnavailableException(string message) : Exception(message);
+
 /// <summary>
 /// Executes buy/sell orders against the latest price in <see cref="PriceCache"/>
 /// (fed by Kafka) and persists the result to Postgres. Each trade runs inside
@@ -38,10 +41,22 @@ public sealed class TradingService
         }
 
         var ticker = request.Ticker.Trim().ToUpperInvariant();
+        if (ticker.Length == 0)
+        {
+            throw new TradeValidationException("ticker must not be empty");
+        }
+
         if (!_priceCache.TryGet(ticker, out var tick))
         {
+            var known = _priceCache.Snapshot().Select(t => t.Ticker.ToUpperInvariant()).OrderBy(t => t).ToList();
+            if (known.Count == 0)
+            {
+                throw new PriceFeedUnavailableException(
+                    "price feed not live yet - no ticks received from the tick engine via Kafka; retry shortly (see GET /health)");
+            }
+
             throw new TradeValidationException(
-                $"no price data yet for '{ticker}' - wait for the tick engine to publish at least one tick for it");
+                $"no price data for '{ticker}'. Tradable tickers: {string.Join(", ", known)}");
         }
 
         var price = tick.Close;

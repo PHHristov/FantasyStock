@@ -1,9 +1,7 @@
 -- Adds password auth on top of 02_app_schema.sql's users table. Nullable so
--- it applies cleanly to the already-seeded user1/user2 rows, which have no
--- password and simply can't log in until one is set - new accounts go
--- through POST /auth/register instead. Only runs automatically on a *fresh*
--- Postgres volume - see docs/poc-3-status.md for how to apply this to an
--- already-initialized db.
+-- it applies cleanly to the already-seeded user1/user2 rows; their dev
+-- passwords are set by 04_seed_passwords.sql. The db-migrate compose service
+-- re-applies this on every start, so existing volumes pick it up too.
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);
 
